@@ -16,13 +16,5 @@ class SupaUser(db.Model):
 with app.app_context():
     db.create_all()
 
-@app.route('/')
-def home():
-    return "¡Hola! El servidor Flask está funcionando."
-
-with app.app_context():
-    db.create_all()
-
-# Iniciar el servidor Flask
 if __name__ == '__main__':
     app.run(debug=True)
