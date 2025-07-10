@@ -1,20 +1,29 @@
-from flask import Flask 
+from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager
+from config import Config
+from routes.usuario import usuarios_bp
+from routes.grupos import grupos_bp
+from routes.proyectos import proyectos_bp
+from routes.categorias import categorias_bp
+from routes.estatus import estatus_bp
+from routes.tareas import tareas_bp
 
-db = SQLAlchemy()
-app= Flask(__name__)
+app = Flask(__name__)
+app.config.from_object(Config)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://postgres:Barman203#@db.bqicuqthwrkcwchzvane.supabase.co:5432/postgres"
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
 
-db.init_app(app)
-
-class SupaUser(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String, unique=True, nullable=False)
-    email = db.Column(db.String)
-
-with app.app_context():
-    db.create_all()
+# Registrar blueprints
+app.register_blueprint(usuarios_bp)
+app.register_blueprint(grupos_bp)
+app.register_blueprint(proyectos_bp)
+app.register_blueprint(categorias_bp)
+app.register_blueprint(estatus_bp)
+app.register_blueprint(tareas_bp)
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
