@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
-from ..models import db, Estatus
+from models.estatus import db, Estatus
 
 estatus_bp = Blueprint('estatus', __name__)
 

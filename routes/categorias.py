@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from ..models import db, Categoria, Proyecto
+from models.categoria import db, Categoria
+from models.proyecto import Proyecto
 
 categorias_bp = Blueprint('categorias', __name__)
 
