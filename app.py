@@ -6,14 +6,16 @@ import os
 from datetime import datetime, timedelta
 from functools import wraps
 from supabase import create_client, Client
+from dotenv import load_dotenv
 import re
 
 # Configuración de la aplicación
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'tu-clave-secreta-super-segura')
+app.config['SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
 CORS(app)
 
 # Configuración de Supabase
+load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_KEY = os.getenv("DATABASE_KEY")
 supabase: Client = create_client(DATABASE_URL, DATABASE_KEY)
