@@ -12,13 +12,33 @@ import re
 # Configuración de la aplicación
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
-CORS(app, resources={r"/*": {"origins": "http://localhost:4200"}})
+
+# Configuración mejorada de CORS
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:4200", "http://127.0.0.1:4200"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "Access-Control-Allow-Credentials"],
+        "supports_credentials": True
+    }
+})
 
 # Configuración de Supabase
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_KEY = os.getenv("DATABASE_KEY")
 supabase: Client = create_client(DATABASE_URL, DATABASE_KEY)
+
+# Añadir manejador explícito para OPTIONS
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response
 
 # Función para validar email
 def validar_email(email):
@@ -60,9 +80,18 @@ def token_required(f):
     
     return decorated
 
+# ========================== RUTAS DE AUTENTICACIÓN ==========================
+
 # Ruta de registro
-@app.route('/registro', methods=['POST'])
+@app.route('/registro', methods=['POST', 'OPTIONS'])
 def registro():
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
@@ -97,7 +126,9 @@ def registro():
             'nombre': nombre,
             'email': email,
             'contrasena': contrasena_cifrada,
-            'es_admin': False
+            'es_admin': False,
+            'id_grupo': 1,  # Grupo por defecto
+            'id_usuario_creador': 1  # Usuario creador por defecto
         }
         
         resultado = supabase.table('usuarios').insert(nuevo_usuario).execute()
@@ -110,7 +141,10 @@ def registro():
                     'id_usuario': usuario_creado['id_usuario'],
                     'nombre': usuario_creado['nombre'],
                     'email': usuario_creado['email'],
-                    'fecha_registro': usuario_creado['fecha_registro']
+                    'es_admin': usuario_creado['es_admin'],
+                    'fecha_registro': usuario_creado['fecha_registro'],
+                    'id_grupo': usuario_creado['id_grupo'],
+                    'id_usuario_creador': usuario_creado['id_usuario_creador']
                 }
             }), 201
         else:
@@ -120,8 +154,15 @@ def registro():
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
 # Ruta de inicio de sesión
-@app.route('/login', methods=['POST'])
+@app.route('/login', methods=['POST', 'OPTIONS'])
 def login():
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
@@ -160,7 +201,10 @@ def login():
                 'id_usuario': usuario['id_usuario'],
                 'nombre': usuario['nombre'],
                 'email': usuario['email'],
-                'es_admin': usuario['es_admin']
+                'es_admin': usuario['es_admin'],
+                'fecha_registro': usuario['fecha_registro'],
+                'id_grupo': usuario['id_grupo'],
+                'id_usuario_creador': usuario['id_usuario_creador']
             }
         }), 200
         
@@ -168,12 +212,19 @@ def login():
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
 # Ruta para obtener perfil del usuario autenticado
-@app.route('/perfil', methods=['GET'])
+@app.route('/perfil', methods=['GET', 'OPTIONS'])
 @token_required
 def perfil(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,OPTIONS")
+        return response
+        
     try:
         # Obtener datos del usuario
-        resultado = supabase.table('usuarios').select('id_usuario, nombre, email, es_admin, fecha_registro').eq('id_usuario', usuario_id).execute()
+        resultado = supabase.table('usuarios').select('*').eq('id_usuario', usuario_id).execute()
         
         if not resultado.data:
             return jsonify({'error': 'Usuario no encontrado'}), 404
@@ -181,30 +232,45 @@ def perfil(usuario_id):
         usuario = resultado.data[0]
         
         return jsonify({
-            'usuario': usuario
+            'usuario': {
+                'id_usuario': usuario['id_usuario'],
+                'nombre': usuario['nombre'],
+                'email': usuario['email'],
+                'es_admin': usuario['es_admin'],
+                'fecha_registro': usuario['fecha_registro'],
+                'id_grupo': usuario['id_grupo'],
+                'id_usuario_creador': usuario['id_usuario_creador']
+            }
         }), 200
         
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-# Ruta para actualizar perfil del usuario
-@app.route('/perfil', methods=['PUT'])
+# Ruta para actualizar perfil
+@app.route('/perfil', methods=['PUT', 'OPTIONS'])
 @token_required
 def actualizar_perfil(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "PUT,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
         if not datos:
-            return jsonify({'error': 'No se proporcionaron datos para actualizar'}), 400
+            return jsonify({'error': 'No se enviaron datos'}), 400
         
-        # Campos permitidos para actualizar
-        campos_actualizables = {}
+        # Preparar datos para actualizar
+        datos_actualizacion = {}
         
         if 'nombre' in datos:
             nombre = datos['nombre'].strip()
             if len(nombre) < 2:
                 return jsonify({'error': 'El nombre debe tener al menos 2 caracteres'}), 400
-            campos_actualizables['nombre'] = nombre
+            datos_actualizacion['nombre'] = nombre
         
         if 'email' in datos:
             email = datos['email'].strip().lower()
@@ -214,15 +280,15 @@ def actualizar_perfil(usuario_id):
             # Verificar si el email ya existe (excluyendo el usuario actual)
             resultado = supabase.table('usuarios').select('id_usuario').eq('email', email).neq('id_usuario', usuario_id).execute()
             if resultado.data:
-                return jsonify({'error': 'El email ya está en uso por otro usuario'}), 400
+                return jsonify({'error': 'El email ya está registrado'}), 400
             
-            campos_actualizables['email'] = email
+            datos_actualizacion['email'] = email
         
-        if not campos_actualizables:
-            return jsonify({'error': 'No se proporcionaron campos válidos para actualizar'}), 400
+        if not datos_actualizacion:
+            return jsonify({'error': 'No se enviaron datos válidos para actualizar'}), 400
         
         # Actualizar usuario
-        resultado = supabase.table('usuarios').update(campos_actualizables).eq('id_usuario', usuario_id).execute()
+        resultado = supabase.table('usuarios').update(datos_actualizacion).eq('id_usuario', usuario_id).execute()
         
         if resultado.data:
             usuario_actualizado = resultado.data[0]
@@ -233,7 +299,9 @@ def actualizar_perfil(usuario_id):
                     'nombre': usuario_actualizado['nombre'],
                     'email': usuario_actualizado['email'],
                     'es_admin': usuario_actualizado['es_admin'],
-                    'fecha_registro': usuario_actualizado['fecha_registro']
+                    'fecha_registro': usuario_actualizado['fecha_registro'],
+                    'id_grupo': usuario_actualizado['id_grupo'],
+                    'id_usuario_creador': usuario_actualizado['id_usuario_creador']
                 }
             }), 200
         else:
@@ -243,9 +311,16 @@ def actualizar_perfil(usuario_id):
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
 # Ruta para cambiar contraseña
-@app.route('/cambiar-contrasena', methods=['PUT'])
+@app.route('/cambiar-contrasena', methods=['PUT', 'OPTIONS'])
 @token_required
 def cambiar_contrasena(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "PUT,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
@@ -259,7 +334,7 @@ def cambiar_contrasena(usuario_id):
         if len(contrasena_nueva) < 6:
             return jsonify({'error': 'La nueva contraseña debe tener al menos 6 caracteres'}), 400
         
-        # Obtener usuario actual
+        # Obtener usuario
         resultado = supabase.table('usuarios').select('contrasena').eq('id_usuario', usuario_id).execute()
         
         if not resultado.data:
@@ -272,53 +347,114 @@ def cambiar_contrasena(usuario_id):
             return jsonify({'error': 'Contraseña actual incorrecta'}), 401
         
         # Cifrar nueva contraseña
-        contrasena_cifrada = generate_password_hash(contrasena_nueva)
+        nueva_contrasena_cifrada = generate_password_hash(contrasena_nueva)
         
         # Actualizar contraseña
-        resultado = supabase.table('usuarios').update({'contrasena': contrasena_cifrada}).eq('id_usuario', usuario_id).execute()
+        resultado = supabase.table('usuarios').update({
+            'contrasena': nueva_contrasena_cifrada
+        }).eq('id_usuario', usuario_id).execute()
         
         if resultado.data:
-            return jsonify({'mensaje': 'Contraseña actualizada exitosamente'}), 200
+            return jsonify({
+                'mensaje': 'Contraseña actualizada exitosamente'
+            }), 200
         else:
             return jsonify({'error': 'Error al actualizar contraseña'}), 500
             
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-# Ruta de salud del servidor
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        'status': 'ok',
-        'timestamp': datetime.utcnow().isoformat(),
-        'message': 'Servidor Flask funcionando correctamente'
-    }), 200
+# ========================== RUTAS DE PROYECTOS ==========================
 
-# Manejo de errores
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Ruta no encontrada'}), 404
+# Crear proyecto
+@app.route('/proyectos', methods=['POST', 'OPTIONS'])
+@token_required
+def crear_proyecto(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        return response
+        
+    try:
+        datos = request.get_json()
+        
+        if not datos or not datos.get('nombre'):
+            return jsonify({'error': 'Nombre del proyecto es requerido'}), 400
+        
+        nombre = datos['nombre'].strip()
+        
+        if len(nombre) < 2:
+            return jsonify({'error': 'El nombre del proyecto debe tener al menos 2 caracteres'}), 400
+        
+        # Crear proyecto
+        nuevo_proyecto = {
+            'nombre': nombre,
+            'id_grupo': 1,  # Grupo por defecto
+            'id_usuario_creador': usuario_id
+        }
+        
+        resultado = supabase.table('proyectos').insert(nuevo_proyecto).execute()
+        
+        if resultado.data:
+            proyecto_creado = resultado.data[0]
+            
+            # Crear categorías por defecto
+            categorias_default = ['To Do', 'In Progress', 'Hot Fix', 'Done']
+            categorias_creadas = []
+            
+            for categoria_nombre in categorias_default:
+                categoria = {
+                    'nombre': categoria_nombre,
+                    'id_proyecto': proyecto_creado['id_proyecto']
+                }
+                resultado_categoria = supabase.table('categorias').insert(categoria).execute()
+                if resultado_categoria.data:
+                    categorias_creadas.append(resultado_categoria.data[0])
+            
+            return jsonify({
+                'mensaje': 'Proyecto creado exitosamente',
+                'proyecto': {
+                    'id_proyecto': proyecto_creado['id_proyecto'],
+                    'nombre': proyecto_creado['nombre'],
+                    'id_grupo': proyecto_creado['id_grupo'],
+                    'id_usuario_creador': proyecto_creado['id_usuario_creador'],
+                    'fecha_creacion': proyecto_creado['fecha_creacion']
+                },
+                'categorias': categorias_creadas
+            }), 201
+        else:
+            return jsonify({'error': 'Error al crear proyecto'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-@app.errorhandler(405)
-def method_not_allowed(error):
-    return jsonify({'error': 'Método no permitido'}), 405
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Error interno del servidor'}), 500
-
-# ==============================
-# MÓDULO DE PROYECTOS
-# ==============================
-
-@app.route('/proyectos', methods=['GET'])
+# Listar proyectos
+@app.route('/proyectos', methods=['GET', 'OPTIONS'])
 @token_required
 def listar_proyectos(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,OPTIONS")
+        return response
+        
     try:
-        # Obtener proyectos del usuario (usando id_usuario_creador)
+        # Obtener proyectos del usuario
         resultado = supabase.table('proyectos').select('*').eq('id_usuario_creador', usuario_id).execute()
         
-        proyectos = resultado.data if resultado.data else []
+        proyectos = []
+        if resultado.data:
+            for proyecto in resultado.data:
+                proyectos.append({
+                    'id_proyecto': proyecto['id_proyecto'],
+                    'nombre': proyecto['nombre'],
+                    'id_grupo': proyecto['id_grupo'],
+                    'id_usuario_creador': proyecto['id_usuario_creador'],
+                    'fecha_creacion': proyecto['fecha_creacion']
+                })
         
         return jsonify({
             'proyectos': proyectos
@@ -327,140 +463,19 @@ def listar_proyectos(usuario_id):
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-@app.route('/proyectos', methods=['POST'])
-@token_required
-def crear_proyecto(usuario_id):
-    try:
-        datos = request.get_json()
-        
-        if not datos or not datos.get('nombre'):
-            return jsonify({'error': 'El nombre del proyecto es requerido'}), 400
-        
-        nombre = datos['nombre'].strip()
-        
-        if len(nombre) < 2:
-            return jsonify({'error': 'El nombre del proyecto debe tener al menos 2 caracteres'}), 400
-        
-        # Primero, crear un grupo de trabajo personal para el usuario
-        grupo_data = {
-            'nombre': f'Proyecto Personal - {nombre}',
-            'id_usuario_creador': usuario_id
-        }
-        
-        resultado_grupo = supabase.table('grupos_trabajo').insert(grupo_data).execute()
-        
-        if not resultado_grupo.data:
-            return jsonify({'error': 'Error al crear grupo de trabajo'}), 500
-        
-        id_grupo = resultado_grupo.data[0]['id_grupo']
-        
-        # Crear el proyecto
-        proyecto_data = {
-            'nombre': nombre,
-            'id_grupo': id_grupo,
-            'id_usuario_creador': usuario_id
-        }
-        
-        resultado_proyecto = supabase.table('proyectos').insert(proyecto_data).execute()
-        
-        if not resultado_proyecto.data:
-            return jsonify({'error': 'Error al crear proyecto'}), 500
-        
-        proyecto_creado = resultado_proyecto.data[0]
-        id_proyecto = proyecto_creado['id_proyecto']
-        
-        # Crear categorías predeterminadas
-        categorias_predeterminadas = [
-            {'nombre': 'To Do', 'id_proyecto': id_proyecto},
-            {'nombre': 'In Progress', 'id_proyecto': id_proyecto},
-            {'nombre': 'Hot Fix', 'id_proyecto': id_proyecto},
-            {'nombre': 'Done', 'id_proyecto': id_proyecto}
-        ]
-        
-        resultado_categorias = supabase.table('categorias').insert(categorias_predeterminadas).execute()
-        
-        if not resultado_categorias.data:
-            # Si falla la creación de categorías, eliminar el proyecto
-            supabase.table('proyectos').delete().eq('id_proyecto', id_proyecto).execute()
-            supabase.table('grupos_trabajo').delete().eq('id_grupo', id_grupo).execute()
-            return jsonify({'error': 'Error al crear categorías predeterminadas'}), 500
-        
-        return jsonify({
-            'mensaje': 'Proyecto creado exitosamente',
-            'proyecto': proyecto_creado,
-            'categorias': resultado_categorias.data
-        }), 201
-        
-    except Exception as e:
-        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
+# ========================== RUTAS DE CATEGORÍAS ==========================
 
-@app.route('/proyectos/<int:id_proyecto>', methods=['DELETE'])
-@token_required
-def eliminar_proyecto(usuario_id, id_proyecto):
-    try:
-        # Verificar que el proyecto existe y pertenece al usuario
-        resultado = supabase.table('proyectos').select('*').eq('id_proyecto', id_proyecto).eq('id_usuario_creador', usuario_id).execute()
-        
-        if not resultado.data:
-            return jsonify({'error': 'Proyecto no encontrado o no tienes permisos'}), 404
-        
-        proyecto = resultado.data[0]
-        id_grupo = proyecto['id_grupo']
-        
-        # Eliminar tareas asociadas (las relaciones en tareas_usuarios se eliminarán automáticamente)
-        supabase.table('tareas_usuarios').delete().eq('id_tarea', 'in', 
-            f"(SELECT id_tarea FROM tareas WHERE id_proyecto = {id_proyecto})").execute()
-        
-        supabase.table('tareas').delete().eq('id_proyecto', id_proyecto).execute()
-        
-        # Eliminar categorías del proyecto
-        supabase.table('categorias').delete().eq('id_proyecto', id_proyecto).execute()
-        
-        # Eliminar el proyecto
-        supabase.table('proyectos').delete().eq('id_proyecto', id_proyecto).execute()
-        
-        # Eliminar el grupo de trabajo
-        supabase.table('grupos_trabajo').delete().eq('id_grupo', id_grupo).execute()
-        
-        return jsonify({'mensaje': 'Proyecto eliminado exitosamente'}), 200
-        
-    except Exception as e:
-        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
-
-# ==============================
-# MÓDULO DE CATEGORÍAS (OPCIONAL)
-# ==============================
-
-@app.route('/categorias', methods=['GET'])
-@token_required
-def listar_categorias(usuario_id):
-    try:
-        proyecto_id = request.args.get('proyecto_id')
-        
-        if not proyecto_id:
-            return jsonify({'error': 'proyecto_id es requerido'}), 400
-        
-        # Verificar que el proyecto pertenece al usuario
-        resultado_proyecto = supabase.table('proyectos').select('id_proyecto').eq('id_proyecto', proyecto_id).eq('id_usuario_creador', usuario_id).execute()
-        
-        if not resultado_proyecto.data:
-            return jsonify({'error': 'Proyecto no encontrado o no tienes permisos'}), 404
-        
-        # Obtener categorías del proyecto
-        resultado = supabase.table('categorias').select('*').eq('id_proyecto', proyecto_id).execute()
-        
-        categorias = resultado.data if resultado.data else []
-        
-        return jsonify({
-            'categorias': categorias
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
-
-@app.route('/categorias', methods=['POST'])
+# Crear categoría
+@app.route('/categorias', methods=['POST', 'OPTIONS'])
 @token_required
 def crear_categoria(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
@@ -473,160 +488,144 @@ def crear_categoria(usuario_id):
         if len(nombre) < 2:
             return jsonify({'error': 'El nombre de la categoría debe tener al menos 2 caracteres'}), 400
         
-        # Verificar que el proyecto pertenece al usuario
+        # Verificar que el proyecto existe y pertenece al usuario
         resultado_proyecto = supabase.table('proyectos').select('id_proyecto').eq('id_proyecto', proyecto_id).eq('id_usuario_creador', usuario_id).execute()
         
         if not resultado_proyecto.data:
-            return jsonify({'error': 'Proyecto no encontrado o no tienes permisos'}), 404
+            return jsonify({'error': 'Proyecto no encontrado o no autorizado'}), 404
         
-        # Verificar que no existe una categoría con el mismo nombre en el proyecto
-        resultado_existe = supabase.table('categorias').select('id_categoria').eq('nombre', nombre).eq('id_proyecto', proyecto_id).execute()
-        
-        if resultado_existe.data:
-            return jsonify({'error': 'Ya existe una categoría con ese nombre en el proyecto'}), 400
-        
-        # Crear la categoría
-        categoria_data = {
+        # Crear categoría
+        nueva_categoria = {
             'nombre': nombre,
             'id_proyecto': proyecto_id
         }
         
-        resultado = supabase.table('categorias').insert(categoria_data).execute()
+        resultado = supabase.table('categorias').insert(nueva_categoria).execute()
         
         if resultado.data:
+            categoria_creada = resultado.data[0]
             return jsonify({
                 'mensaje': 'Categoría creada exitosamente',
-                'categoria': resultado.data[0]
+                'categoria': {
+                    'id_categoria': categoria_creada['id_categoria'],
+                    'nombre': categoria_creada['nombre'],
+                    'id_proyecto': categoria_creada['id_proyecto']
+                }
             }), 201
         else:
             return jsonify({'error': 'Error al crear categoría'}), 500
-        
+            
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-@app.route('/categorias/<int:id_categoria>', methods=['DELETE'])
+# Listar categorías por proyecto
+@app.route('/proyectos/<int:proyecto_id>/categorias', methods=['GET', 'OPTIONS'])
 @token_required
-def eliminar_categoria(usuario_id, id_categoria):
+def listar_categorias(usuario_id, proyecto_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,OPTIONS")
+        return response
+        
     try:
-        # Verificar que la categoría existe y el usuario tiene permisos
-        resultado = supabase.table('categorias').select('*, proyectos!inner(id_usuario_creador)').eq('id_categoria', id_categoria).execute()
-        
-        if not resultado.data:
-            return jsonify({'error': 'Categoría no encontrada'}), 404
-        
-        categoria = resultado.data[0]
-        
-        # Verificar que el usuario es el creador del proyecto
-        if categoria['proyectos']['id_usuario_creador'] != usuario_id:
-            return jsonify({'error': 'No tienes permisos para eliminar esta categoría'}), 403
-        
-        # Verificar que no hay tareas asociadas a esta categoría
-        resultado_tareas = supabase.table('tareas').select('id_tarea').eq('id_categoria', id_categoria).execute()
-        
-        if resultado_tareas.data:
-            return jsonify({'error': 'No se puede eliminar la categoría porque tiene tareas asociadas'}), 400
-        
-        # Eliminar la categoría
-        supabase.table('categorias').delete().eq('id_categoria', id_categoria).execute()
-        
-        return jsonify({'mensaje': 'Categoría eliminada exitosamente'}), 200
-        
-    except Exception as e:
-        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
-
-# ==============================
-# MÓDULO DE TAREAS
-# ==============================
-
-@app.route('/tareas/<int:id_proyecto>', methods=['GET'])
-@token_required
-def listar_tareas(usuario_id, id_proyecto):
-    try:
-        # Verificar que el proyecto pertenece al usuario
-        resultado_proyecto = supabase.table('proyectos').select('id_proyecto').eq('id_proyecto', id_proyecto).eq('id_usuario_creador', usuario_id).execute()
+        # Verificar que el proyecto existe y pertenece al usuario
+        resultado_proyecto = supabase.table('proyectos').select('id_proyecto').eq('id_proyecto', proyecto_id).eq('id_usuario_creador', usuario_id).execute()
         
         if not resultado_proyecto.data:
-            return jsonify({'error': 'Proyecto no encontrado o no tienes permisos'}), 404
+            return jsonify({'error': 'Proyecto no encontrado o no autorizado'}), 404
         
-        # Obtener tareas del proyecto con información de categoría y estatus
-        resultado = supabase.table('tareas').select('''
-            *,
-            categorias!inner(nombre),
-            estatus!inner(nombre)
-        ''').eq('id_proyecto', id_proyecto).execute()
+        # Obtener categorías del proyecto
+        resultado = supabase.table('categorias').select('*').eq('id_proyecto', proyecto_id).execute()
         
-        tareas = []
-        for tarea in resultado.data if resultado.data else []:
-            tarea_info = {
-                'id_tarea': tarea['id_tarea'],
-                'titulo': tarea['titulo'],
-                'descripcion': tarea['descripcion'],
-                'prioridad': tarea['prioridad'],
-                'fecha_creacion': tarea['fecha_creacion'],
-                'fecha_vencimiento': tarea['fecha_vencimiento'],
-                'categoria': tarea['categorias']['nombre'],
-                'estatus': tarea['estatus']['nombre']
-            }
-            tareas.append(tarea_info)
+        categorias = []
+        if resultado.data:
+            for categoria in resultado.data:
+                categorias.append({
+                    'id_categoria': categoria['id_categoria'],
+                    'nombre': categoria['nombre'],
+                    'id_proyecto': categoria['id_proyecto']
+                })
         
         return jsonify({
-            'tareas': tareas
+            'categorias': categorias
         }), 200
         
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-@app.route('/tareas', methods=['POST'])
+# ========================== RUTAS DE TAREAS ==========================
+
+# Crear tarea
+@app.route('/tareas', methods=['POST', 'OPTIONS'])
 @token_required
 def crear_tarea(usuario_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
-        # Validar datos requeridos
-        campos_requeridos = ['titulo', 'id_proyecto', 'nombre_categoria', 'nombre_estatus']
-        for campo in campos_requeridos:
-            if not datos or not datos.get(campo):
-                return jsonify({'error': f'{campo} es requerido'}), 400
+        if not datos or not datos.get('titulo') or not datos.get('id_proyecto') or not datos.get('nombre_categoria') or not datos.get('nombre_estatus'):
+            return jsonify({'error': 'Título, id_proyecto, nombre_categoria y nombre_estatus son requeridos'}), 400
         
         titulo = datos['titulo'].strip()
         descripcion = datos.get('descripcion', '').strip()
+        id_proyecto = datos['id_proyecto']
         nombre_categoria = datos['nombre_categoria'].strip()
         nombre_estatus = datos['nombre_estatus'].strip()
         prioridad = datos.get('prioridad', 3)
         fecha_vencimiento = datos.get('fecha_vencimiento')
-        id_proyecto = datos['id_proyecto']
         
-        # Validaciones
         if len(titulo) < 2:
             return jsonify({'error': 'El título debe tener al menos 2 caracteres'}), 400
         
-        if not isinstance(prioridad, int) or prioridad < 1 or prioridad > 5:
-            return jsonify({'error': 'La prioridad debe ser un número entre 1 y 5'}), 400
-        
-        # Verificar que el proyecto pertenece al usuario
+        # Verificar que el proyecto existe y pertenece al usuario
         resultado_proyecto = supabase.table('proyectos').select('id_proyecto').eq('id_proyecto', id_proyecto).eq('id_usuario_creador', usuario_id).execute()
         
         if not resultado_proyecto.data:
-            return jsonify({'error': 'Proyecto no encontrado o no tienes permisos'}), 404
+            return jsonify({'error': 'Proyecto no encontrado o no autorizado'}), 404
         
-        # Obtener ID de categoría
+        # Buscar o crear categoría
         resultado_categoria = supabase.table('categorias').select('id_categoria').eq('nombre', nombre_categoria).eq('id_proyecto', id_proyecto).execute()
         
         if not resultado_categoria.data:
-            return jsonify({'error': 'Categoría no encontrada en el proyecto'}), 400
+            # Crear categoría
+            nueva_categoria = {
+                'nombre': nombre_categoria,
+                'id_proyecto': id_proyecto
+            }
+            resultado_categoria = supabase.table('categorias').insert(nueva_categoria).execute()
+            if resultado_categoria.data:
+                id_categoria = resultado_categoria.data[0]['id_categoria']
+            else:
+                return jsonify({'error': 'Error al crear categoría'}), 500
+        else:
+            id_categoria = resultado_categoria.data[0]['id_categoria']
         
-        id_categoria = resultado_categoria.data[0]['id_categoria']
-        
-        # Obtener ID de estatus
+        # Buscar o crear estatus
         resultado_estatus = supabase.table('estatus').select('id_estatus').eq('nombre', nombre_estatus).execute()
         
         if not resultado_estatus.data:
-            return jsonify({'error': 'Estatus no encontrado'}), 400
+            # Crear estatus
+            nuevo_estatus = {
+                'nombre': nombre_estatus
+            }
+            resultado_estatus = supabase.table('estatus').insert(nuevo_estatus).execute()
+            if resultado_estatus.data:
+                id_estatus = resultado_estatus.data[0]['id_estatus']
+            else:
+                return jsonify({'error': 'Error al crear estatus'}), 500
+        else:
+            id_estatus = resultado_estatus.data[0]['id_estatus']
         
-        id_estatus = resultado_estatus.data[0]['id_estatus']
-        
-        # Crear la tarea
-        tarea_data = {
+        # Crear tarea
+        nueva_tarea = {
             'titulo': titulo,
             'descripcion': descripcion,
             'id_proyecto': id_proyecto,
@@ -636,162 +635,291 @@ def crear_tarea(usuario_id):
             'fecha_vencimiento': fecha_vencimiento
         }
         
-        resultado_tarea = supabase.table('tareas').insert(tarea_data).execute()
+        resultado = supabase.table('tareas').insert(nueva_tarea).execute()
         
-        if not resultado_tarea.data:
+        if resultado.data:
+            tarea_creada = resultado.data[0]
+            return jsonify({
+                'mensaje': 'Tarea creada exitosamente',
+                'tarea': {
+                    'id_tarea': tarea_creada['id_tarea'],
+                    'titulo': tarea_creada['titulo'],
+                    'descripcion': tarea_creada['descripcion'],
+                    'prioridad': tarea_creada['prioridad'],
+                    'fecha_creacion': tarea_creada['fecha_creacion'],
+                    'fecha_vencimiento': tarea_creada['fecha_vencimiento'],
+                    'categoria': nombre_categoria,
+                    'estatus': nombre_estatus,
+                    'id_proyecto': tarea_creada['id_proyecto'],
+                    'id_categoria': tarea_creada['id_categoria'],
+                    'id_estatus': tarea_creada['id_estatus']
+                }
+            }), 201
+        else:
             return jsonify({'error': 'Error al crear tarea'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
+
+# Listar tareas por proyecto
+@app.route('/proyectos/<int:proyecto_id>/tareas', methods=['GET', 'OPTIONS'])
+@token_required
+def listar_tareas(usuario_id, proyecto_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,OPTIONS")
+        return response
         
-        tarea_creada = resultado_tarea.data[0]
-        id_tarea = tarea_creada['id_tarea']
+    try:
+        # Verificar que el proyecto existe y pertenece al usuario
+        resultado_proyecto = supabase.table('proyectos').select('id_proyecto').eq('id_proyecto', proyecto_id).eq('id_usuario_creador', usuario_id).execute()
         
-        # Asignar la tarea al usuario
-        asignacion_data = {
-            'id_tarea': id_tarea,
-            'id_usuario': usuario_id
-        }
+        if not resultado_proyecto.data:
+            return jsonify({'error': 'Proyecto no encontrado o no autorizado'}), 404
         
-        resultado_asignacion = supabase.table('tareas_usuarios').insert(asignacion_data).execute()
+        # Obtener tareas con joins
+        resultado = supabase.table('tareas').select('''
+            id_tarea,
+            titulo,
+            descripcion,
+            prioridad,
+            fecha_creacion,
+            fecha_vencimiento,
+            id_proyecto,
+            id_categoria,
+            id_estatus,
+            categorias!inner(nombre),
+            estatus!inner(nombre)
+        ''').eq('id_proyecto', proyecto_id).execute()
         
-        if not resultado_asignacion.data:
-            # Si falla la asignación, eliminar la tarea
-            supabase.table('tareas').delete().eq('id_tarea', id_tarea).execute()
-            return jsonify({'error': 'Error al asignar tarea al usuario'}), 500
+        tareas = []
+        if resultado.data:
+            for tarea in resultado.data:
+                tareas.append({
+                    'id_tarea': tarea['id_tarea'],
+                    'titulo': tarea['titulo'],
+                    'descripcion': tarea['descripcion'],
+                    'prioridad': tarea['prioridad'],
+                    'fecha_creacion': tarea['fecha_creacion'],
+                    'fecha_vencimiento': tarea['fecha_vencimiento'],
+                    'categoria': tarea['categorias']['nombre'],
+                    'estatus': tarea['estatus']['nombre'],
+                    'id_proyecto': tarea['id_proyecto'],
+                    'id_categoria': tarea['id_categoria'],
+                    'id_estatus': tarea['id_estatus']
+                })
         
         return jsonify({
-            'mensaje': 'Tarea creada exitosamente',
-            'tarea': tarea_creada
-        }), 201
+            'tareas': tareas
+        }), 200
         
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-@app.route('/tareas/<int:id_tarea>', methods=['PUT'])
+# Actualizar tarea
+@app.route('/tareas/<int:tarea_id>', methods=['PUT', 'OPTIONS'])
 @token_required
-def editar_tarea(usuario_id, id_tarea):
+def actualizar_tarea(usuario_id, tarea_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "PUT,OPTIONS")
+        return response
+        
     try:
         datos = request.get_json()
         
         if not datos:
-            return jsonify({'error': 'No se proporcionaron datos para actualizar'}), 400
+            return jsonify({'error': 'No se enviaron datos'}), 400
         
-        # Verificar que la tarea existe y está asignada al usuario
+        # Verificar que la tarea existe y pertenece a un proyecto del usuario
         resultado_tarea = supabase.table('tareas').select('''
-            *,
+            id_tarea,
+            id_proyecto,
+            id_categoria,
+            id_estatus,
             proyectos!inner(id_usuario_creador)
-        ''').eq('id_tarea', id_tarea).execute()
+        ''').eq('id_tarea', tarea_id).execute()
         
         if not resultado_tarea.data:
             return jsonify({'error': 'Tarea no encontrada'}), 404
         
         tarea = resultado_tarea.data[0]
         
-        # Verificar que el usuario es el creador del proyecto
         if tarea['proyectos']['id_usuario_creador'] != usuario_id:
-            return jsonify({'error': 'No tienes permisos para editar esta tarea'}), 403
+            return jsonify({'error': 'No autorizado'}), 403
         
-        # Campos actualizables
-        campos_actualizables = {}
+        # Preparar datos para actualizar
+        datos_actualizacion = {}
         
         if 'titulo' in datos:
             titulo = datos['titulo'].strip()
             if len(titulo) < 2:
                 return jsonify({'error': 'El título debe tener al menos 2 caracteres'}), 400
-            campos_actualizables['titulo'] = titulo
+            datos_actualizacion['titulo'] = titulo
         
         if 'descripcion' in datos:
-            campos_actualizables['descripcion'] = datos['descripcion'].strip()
+            datos_actualizacion['descripcion'] = datos['descripcion'].strip()
         
         if 'prioridad' in datos:
             prioridad = datos['prioridad']
-            if not isinstance(prioridad, int) or prioridad < 1 or prioridad > 5:
-                return jsonify({'error': 'La prioridad debe ser un número entre 1 y 5'}), 400
-            campos_actualizables['prioridad'] = prioridad
+            if prioridad not in [1, 2, 3, 4, 5]:
+                return jsonify({'error': 'La prioridad debe ser entre 1 y 5'}), 400
+            datos_actualizacion['prioridad'] = prioridad
         
         if 'fecha_vencimiento' in datos:
-            campos_actualizables['fecha_vencimiento'] = datos['fecha_vencimiento']
-        
-        if 'nombre_estatus' in datos:
-            nombre_estatus = datos['nombre_estatus'].strip()
-            resultado_estatus = supabase.table('estatus').select('id_estatus').eq('nombre', nombre_estatus).execute()
-            
-            if not resultado_estatus.data:
-                return jsonify({'error': 'Estatus no encontrado'}), 400
-            
-            campos_actualizables['id_estatus'] = resultado_estatus.data[0]['id_estatus']
+            datos_actualizacion['fecha_vencimiento'] = datos['fecha_vencimiento']
         
         if 'nombre_categoria' in datos:
             nombre_categoria = datos['nombre_categoria'].strip()
+            # Buscar o crear categoría
             resultado_categoria = supabase.table('categorias').select('id_categoria').eq('nombre', nombre_categoria).eq('id_proyecto', tarea['id_proyecto']).execute()
             
             if not resultado_categoria.data:
-                return jsonify({'error': 'Categoría no encontrada en el proyecto'}), 400
+                # Crear categoría
+                nueva_categoria = {
+                    'nombre': nombre_categoria,
+                    'id_proyecto': tarea['id_proyecto']
+                }
+                resultado_categoria = supabase.table('categorias').insert(nueva_categoria).execute()
+                if resultado_categoria.data:
+                    datos_actualizacion['id_categoria'] = resultado_categoria.data[0]['id_categoria']
+                else:
+                    return jsonify({'error': 'Error al crear categoría'}), 500
+            else:
+                datos_actualizacion['id_categoria'] = resultado_categoria.data[0]['id_categoria']
+        
+        if 'nombre_estatus' in datos:
+            nombre_estatus = datos['nombre_estatus'].strip()
+            # Buscar o crear estatus
+            resultado_estatus = supabase.table('estatus').select('id_estatus').eq('nombre', nombre_estatus).execute()
             
-            campos_actualizables['id_categoria'] = resultado_categoria.data[0]['id_categoria']
+            if not resultado_estatus.data:
+                # Crear estatus
+                nuevo_estatus = {
+                    'nombre': nombre_estatus
+                }
+                resultado_estatus = supabase.table('estatus').insert(nuevo_estatus).execute()
+                if resultado_estatus.data:
+                    datos_actualizacion['id_estatus'] = resultado_estatus.data[0]['id_estatus']
+                else:
+                    return jsonify({'error': 'Error al crear estatus'}), 500
+            else:
+                datos_actualizacion['id_estatus'] = resultado_estatus.data[0]['id_estatus']
         
-        if not campos_actualizables:
-            return jsonify({'error': 'No se proporcionaron campos válidos para actualizar'}), 400
+        if not datos_actualizacion:
+            return jsonify({'error': 'No se enviaron datos válidos para actualizar'}), 400
         
-        # Actualizar la tarea
-        resultado = supabase.table('tareas').update(campos_actualizables).eq('id_tarea', id_tarea).execute()
+        # Actualizar tarea
+        resultado = supabase.table('tareas').update(datos_actualizacion).eq('id_tarea', tarea_id).execute()
         
         if resultado.data:
-            return jsonify({
-                'mensaje': 'Tarea actualizada exitosamente',
-                'tarea': resultado.data[0]
-            }), 200
+            # Obtener tarea actualizada con joins
+            resultado_actualizada = supabase.table('tareas').select('''
+                id_tarea,
+                titulo,
+                descripcion,
+                prioridad,
+                fecha_creacion,
+                fecha_vencimiento,
+                id_proyecto,
+                id_categoria,
+                id_estatus,
+                categorias!inner(nombre),
+                estatus!inner(nombre)
+            ''').eq('id_tarea', tarea_id).execute()
+            
+            if resultado_actualizada.data:
+                tarea_actualizada = resultado_actualizada.data[0]
+                return jsonify({
+                    'mensaje': 'Tarea actualizada exitosamente',
+                    'tarea': {
+                        'id_tarea': tarea_actualizada['id_tarea'],
+                        'titulo': tarea_actualizada['titulo'],
+                        'descripcion': tarea_actualizada['descripcion'],
+                        'prioridad': tarea_actualizada['prioridad'],
+                        'fecha_creacion': tarea_actualizada['fecha_creacion'],
+                        'fecha_vencimiento': tarea_actualizada['fecha_vencimiento'],
+                        'categoria': tarea_actualizada['categorias']['nombre'],
+                        'estatus': tarea_actualizada['estatus']['nombre'],
+                        'id_proyecto': tarea_actualizada['id_proyecto'],
+                        'id_categoria': tarea_actualizada['id_categoria'],
+                        'id_estatus': tarea_actualizada['id_estatus']
+                    }
+                }), 200
+            else:
+                return jsonify({'error': 'Error al obtener tarea actualizada'}), 500
         else:
             return jsonify({'error': 'Error al actualizar tarea'}), 500
-        
+            
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-@app.route('/tareas/<int:id_tarea>', methods=['DELETE'])
+# Eliminar tarea
+@app.route('/tareas/<int:tarea_id>', methods=['DELETE', 'OPTIONS'])
 @token_required
-def eliminar_tarea(usuario_id, id_tarea):
+def eliminar_tarea(usuario_id, tarea_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "DELETE,OPTIONS")
+        return response
+        
     try:
-        # Verificar que la tarea existe y el usuario tiene permisos
+        # Verificar que la tarea existe y pertenece a un proyecto del usuario
         resultado_tarea = supabase.table('tareas').select('''
-            *,
+            id_tarea,
             proyectos!inner(id_usuario_creador)
-        ''').eq('id_tarea', id_tarea).execute()
+        ''').eq('id_tarea', tarea_id).execute()
         
         if not resultado_tarea.data:
             return jsonify({'error': 'Tarea no encontrada'}), 404
         
         tarea = resultado_tarea.data[0]
         
-        # Verificar que el usuario es el creador del proyecto
         if tarea['proyectos']['id_usuario_creador'] != usuario_id:
-            return jsonify({'error': 'No tienes permisos para eliminar esta tarea'}), 403
+            return jsonify({'error': 'No autorizado'}), 403
         
-        # Eliminar relación en tareas_usuarios
-        supabase.table('tareas_usuarios').delete().eq('id_tarea', id_tarea).execute()
+        # Eliminar tarea
+        resultado = supabase.table('tareas').delete().eq('id_tarea', tarea_id).execute()
         
-        # Eliminar la tarea
-        supabase.table('tareas').delete().eq('id_tarea', id_tarea).execute()
-        
-        return jsonify({'mensaje': 'Tarea eliminada exitosamente'}), 200
-        
+        if resultado.data:
+            return jsonify({
+                'mensaje': 'Tarea eliminada exitosamente'
+            }), 200
+        else:
+            return jsonify({'error': 'Error al eliminar tarea'}), 500
+            
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
-# ==============================
-# MÓDULO DE TABLERO PERSONAL
-# ==============================
+# ========================== RUTA DEL TABLERO ==========================
 
-@app.route('/tablero/<int:id_proyecto>', methods=['GET'])
+# Obtener tablero completo de un proyecto
+@app.route('/proyectos/<int:proyecto_id>/tablero', methods=['GET', 'OPTIONS'])
 @token_required
-def obtener_tablero(usuario_id, id_proyecto):
+def obtener_tablero(usuario_id, proyecto_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,OPTIONS")
+        return response
+        
     try:
-        # Verificar que el proyecto pertenece al usuario
-        resultado_proyecto = supabase.table('proyectos').select('*').eq('id_proyecto', id_proyecto).eq('id_usuario_creador', usuario_id).execute()
+        # Verificar que el proyecto existe y pertenece al usuario
+        resultado_proyecto = supabase.table('proyectos').select('*').eq('id_proyecto', proyecto_id).eq('id_usuario_creador', usuario_id).execute()
         
         if not resultado_proyecto.data:
-            return jsonify({'error': 'Proyecto no encontrado o no tienes permisos'}), 404
+            return jsonify({'error': 'Proyecto no encontrado o no autorizado'}), 404
         
         proyecto = resultado_proyecto.data[0]
         
-        # Obtener resumen de tareas por categoría
+        # Obtener todas las tareas del proyecto con joins
         resultado_tareas = supabase.table('tareas').select('''
             id_tarea,
             titulo,
@@ -799,57 +927,124 @@ def obtener_tablero(usuario_id, id_proyecto):
             prioridad,
             fecha_creacion,
             fecha_vencimiento,
+            id_proyecto,
+            id_categoria,
+            id_estatus,
             categorias!inner(nombre),
             estatus!inner(nombre)
-        ''').eq('id_proyecto', id_proyecto).execute()
+        ''').eq('id_proyecto', proyecto_id).execute()
         
-        # Organizar tareas por categoría
-        tablero = {
-            'proyecto': proyecto,
-            'categorias': {
-                'To Do': [],
-                'In Progress': [],
-                'Hot Fix': [],
-                'Done': []
-            },
-            'resumen': {
-                'total_tareas': 0,
-                'por_categoria': {
-                    'To Do': 0,
-                    'In Progress': 0,
-                    'Hot Fix': 0,
-                    'Done': 0
-                },
-                'por_prioridad': {
-                    '1': 0, '2': 0, '3': 0, '4': 0, '5': 0
-                }
-            }
+        # Organizar tareas por categoría (estatus)
+        categorias_tablero = {
+            'To Do': [],
+            'In Progress': [],
+            'Hot Fix': [],
+            'Done': []
         }
         
-        for tarea in resultado_tareas.data if resultado_tareas.data else []:
-            categoria = tarea['categorias']['nombre']
-            
-            tarea_info = {
-                'id_tarea': tarea['id_tarea'],
-                'titulo': tarea['titulo'],
-                'descripcion': tarea['descripcion'],
-                'prioridad': tarea['prioridad'],
-                'fecha_creacion': tarea['fecha_creacion'],
-                'fecha_vencimiento': tarea['fecha_vencimiento'],
-                'estatus': tarea['estatus']['nombre']
+        # Contadores para resumen
+        total_tareas = 0
+        por_categoria = {
+            'To Do': 0,
+            'In Progress': 0,
+            'Hot Fix': 0,
+            'Done': 0
+        }
+        por_prioridad = {
+            '1': 0,
+            '2': 0,
+            '3': 0,
+            '4': 0,
+            '5': 0
+        }
+        
+        if resultado_tareas.data:
+            for tarea in resultado_tareas.data:
+                total_tareas += 1
+                
+                tarea_formateada = {
+                    'id_tarea': tarea['id_tarea'],
+                    'titulo': tarea['titulo'],
+                    'descripcion': tarea['descripcion'],
+                    'prioridad': tarea['prioridad'],
+                    'fecha_creacion': tarea['fecha_creacion'],
+                    'fecha_vencimiento': tarea['fecha_vencimiento'],
+                    'categoria': tarea['categorias']['nombre'],
+                    'estatus': tarea['estatus']['nombre'],
+                    'id_proyecto': tarea['id_proyecto'],
+                    'id_categoria': tarea['id_categoria'],
+                    'id_estatus': tarea['id_estatus']
+                }
+                
+                estatus = tarea['estatus']['nombre']
+                
+                # Agregar a la categoría correspondiente
+                if estatus in categorias_tablero:
+                    categorias_tablero[estatus].append(tarea_formateada)
+                    por_categoria[estatus] += 1
+                else:
+                    # Si el estatus no está en las categorías por defecto, agregarlo a "To Do"
+                    categorias_tablero['To Do'].append(tarea_formateada)
+                    por_categoria['To Do'] += 1
+                
+                # Contar por prioridad
+                prioridad_str = str(tarea['prioridad'])
+                if prioridad_str in por_prioridad:
+                    por_prioridad[prioridad_str] += 1
+        
+        # Construir respuesta del tablero
+        tablero = {
+            'proyecto': {
+                'id_proyecto': proyecto['id_proyecto'],
+                'nombre': proyecto['nombre'],
+                'id_grupo': proyecto['id_grupo'],
+                'id_usuario_creador': proyecto['id_usuario_creador'],
+                'fecha_creacion': proyecto['fecha_creacion']
+            },
+            'categorias': categorias_tablero,
+            'resumen': {
+                'total_tareas': total_tareas,
+                'por_categoria': por_categoria,
+                'por_prioridad': por_prioridad
             }
-            
-            if categoria in tablero['categorias']:
-                tablero['categorias'][categoria].append(tarea_info)
-                tablero['resumen']['por_categoria'][categoria] += 1
-            
-            tablero['resumen']['total_tareas'] += 1
-            tablero['resumen']['por_prioridad'][str(tarea['prioridad'])] += 1
+        }
         
         return jsonify(tablero), 200
         
     except Exception as e:
         return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
+
+# ========================== MANEJO DE ERRORES ==========================
+
+# Manejo de errores mejorado
+@app.errorhandler(404)
+def not_found(error):
+    response = jsonify({'error': 'Ruta no encontrada'})
+    response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+    return response, 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    response = jsonify({'error': 'Método no permitido'})
+    response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+    return response, 405
+
+@app.errorhandler(500)
+def internal_error(error):
+    response = jsonify({'error': 'Error interno del servidor'})
+    response.headers.add("Access-Control-Allow-Origin", "http://localhost:4200")
+    return response, 500
+
+# ========================== RUTA DE SALUD ==========================
+
+# Ruta de salud del servidor
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'ok',
+        'timestamp': datetime.utcnow().isoformat(),
+        'message': 'Servidor Flask funcionando correctamente'
+    }), 200
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
