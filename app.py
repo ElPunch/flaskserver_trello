@@ -12,7 +12,7 @@ import re
 # Configuración de la aplicación
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "http://localhost:4200"}})
 
 # Configuración de Supabase
 load_dotenv()
